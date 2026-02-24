@@ -578,18 +578,7 @@ def DocAnalyst(state: AgentState) -> List[Evidence]:
 
 
 def vision_inspector_node(state: AgentState) -> Dict[str, Any]:
-    """
-    LangGraph node: VisionInspector (The Diagram Detective).
 
-    Forensic protocol:
-    - Extract images from the PDF
-    - Classify each image: LangGraph StateGraph diagram, sequence diagram,
-      or generic flowchart?
-    - Verify the diagram explicitly shows parallel fan-out/fan-in
-
-    INTERIM: Image extraction runs. Multimodal LLM classification is stubbed.
-    Confidence is derived from the number of images extracted — not hardcoded.
-    """
     pdf_path = state.get("pdf_path", "")
     evidences: List[Evidence] = []
 
