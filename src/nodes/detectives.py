@@ -200,7 +200,7 @@ def confidence_path_crossref(crossref_result: Dict) -> float:
     return round(crossref_result.get("accuracy_score", 0.0), 2)
 
 
-def RepoInvestigator(state: AgentState) -> List[Evidence]:
+def repo_investigator(state: AgentState) -> List[Evidence]:
     repo_url = state["repo_url"]
     rubric_dimensions = state.get("rubric_dimensions", [])
     repo_dims = [
@@ -420,7 +420,7 @@ def RepoInvestigator(state: AgentState) -> List[Evidence]:
     return {"evidences": {"repo": evidences}}
 
 
-def DocAnalyst(state: AgentState) -> List[Evidence]:
+def doc_analyst(state: AgentState) -> List[Evidence]:
     """
     LangGraph node: DocAnalyst (The Paperwork Detective).
 
