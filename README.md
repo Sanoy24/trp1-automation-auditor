@@ -1,203 +1,158 @@
-# The Automaton Auditor
+# Automaton Auditor Swarm
 
-**FDE Challenge Week 2 — Orchestrating Deep LangGraph Swarms for Autonomous Governance**
+An agentic swarm built on **LangGraph** that audits GitHub repositories and PDF reports using a dialectical judicial framework. Three detective agents collect forensic evidence in parallel, three judge personas deliberate with conflicting philosophies, and a Chief Justice synthesises the final verdict using deterministic rules.
 
-A hierarchical multi-agent swarm that audits a GitHub repository and its accompanying PDF report with forensic precision. Detective agents collect structured evidence in parallel; the output is a typed `AgentState` ready for judicial analysis in the final submission.
-
----
-
-## Prerequisites
-
-- **Python 3.11+** — verify with `python --version`
-- **git** — must be available in `PATH` for the `RepoInvestigator` to clone target repos
-- **uv** — the package manager used to manage this project's dependencies
-
-Install `uv` if you don't have it:
-
-```bash
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-Verify the installation:
-
-```bash
-uv --version
-```
-
----
-
-## Installation
-
-```bash
-# 1. Clone this repository
-git clone https://github.com/<your-username>/automaton-auditor.git
-cd automaton-auditor
-
-# 2. Create a virtual environment
-uv venv
-
-# 3. Activate it
-source .venv/bin/activate        # macOS / Linux
-# .venv\Scripts\activate         # Windows
-
-# 4. Install all dependencies
-uv pip install -e .
-```
-
-All dependencies are declared in `pyproject.toml`. The `-e .` flag installs the project in editable mode so `src/` is importable directly.
-
----
-
-## Configuration
-
-Copy the example environment file and fill in your API keys:
-
-```bash
-cp .env.example .env
-```
-
-Then open `.env` and set the following:
-
-```bash
-# Required — LLM provider for detective nodes
-OPENAI_API_KEY=sk-...
-
-# Required — LangSmith observability
-# Set this before your first run. Debugging parallel multi-agent
-# chains without traces is extremely difficult.
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=lsv2_...
-LANGCHAIN_PROJECT=automaton-auditor
-```
-
-Your `.env` file is listed in `.gitignore` and will never be committed.
-
----
-
-## Running the Detective Graph
-
-The detective graph clones a target GitHub repository, parses its PDF report, and returns structured `Evidence` objects from three parallel detectives: `RepoInvestigator`, `DocAnalyst`, and `VisionInspector`.
-
-### Option 1 — Python script (recommended)
-
-Create a file called `audit.py` in the project root:
-
-```python
-from dotenv import load_dotenv
-load_dotenv()
-
-from src.graph import run_detective_audit
-
-state = run_detective_audit(
-    repo_url="https://github.com/PEER_USERNAME/automaton-auditor",
-    pdf_path="reports/their_interim_report.pdf",   # local path to the PDF
-)
-
-# Print all collected evidence
-for detective, evidence_list in state["evidences"].items():
-    print(f"\n{'='*60}")
-    print(f"  {detective.upper()} — {len(evidence_list)} evidence items")
-    print(f"{'='*60}")
-    for ev in evidence_list:
-        status = "✓ FOUND    " if ev.found else "✗ NOT FOUND"
-        print(f"\n  [{status}] {ev.goal}")
-        print(f"    location:   {ev.location}")
-        print(f"    confidence: {ev.confidence:.0%}")
-        print(f"    rationale:  {ev.rationale}")
-        if ev.content:
-            preview = ev.content[:120].replace("\n", " ")
-            print(f"    content:    {preview}...")
-```
-
-Run it:
-
-```bash
-python audit.py
-```
-
-### Option 2 — One-liner from the command line
-
-```bash
-python -c "
-from dotenv import load_dotenv; load_dotenv()
-from src.graph import run_detective_audit
-state = run_detective_audit(
-    repo_url='https://github.com/PEER_USERNAME/automaton-auditor',
-    pdf_path='reports/their_interim_report.pdf',
-)
-total = sum(len(v) for v in state['evidences'].values())
-found = sum(e.found for v in state['evidences'].values() for e in v)
-print(f'Done. {total} evidence items collected, {found} confirmed found.')
-"
-```
-
-### What the graph does
+## Architecture
 
 ```
 START
-  └─► ContextBuilder          loads rubric.json, initialises state
-        │
-        ├─► RepoInvestigator   clones repo (sandboxed), runs git log,
-        │                      AST-parses graph structure and state schema
-        │
-        ├─► DocAnalyst         ingests PDF via RAG-lite chunking,
-        │                      verifies forensic concepts, extracts file paths
-        │
-        └─► VisionInspector    extracts images from PDF (classification stub)
-              │
-        [operator.ior merges all three evidence dicts in parallel]
-              │
-        EvidenceAggregator     fan-in sync, validates completeness
-              │
-             END
+  │
+  ├──► RepoInvestigator (code detective)  ──┐
+  │                                          │
+  └──► DocAnalyst (document detective)     ──┤
+                                             │
+                          EvidenceAggregator  (fan-in sync)
+                                             │
+                   ┌─────────────────────────┤
+                   │            │             │
+              Prosecutor    Defense      TechLead     ← fan-out (TODO)
+                   │            │             │
+                   └─────────────────────────┤
+                                             │
+                                    ChiefJustice (TODO)
+                                             │
+                                            END
 ```
 
-The three detectives run **concurrently** — not sequentially. Each writes to its own key in `state["evidences"]`:
+### Key Design Decisions
 
-| Detective          | State key             | What it checks                                        |
-| ------------------ | --------------------- | ----------------------------------------------------- |
-| `RepoInvestigator` | `evidences["repo"]`   | Git history, AST structure, sandboxing, file manifest |
-| `DocAnalyst`       | `evidences["doc"]`    | PDF concepts, file path cross-reference               |
-| `VisionInspector`  | `evidences["vision"]` | Diagram image extraction                              |
-
----
+- **Pydantic over dicts** — `Evidence` and `JudicialOpinion` are strict `BaseModel` classes with typed fields, ensuring validation at every boundary instead of brittle nested dicts.
+- **Annotated reducers** — `AgentState` uses `Annotated[Dict, operator.ior]` and `Annotated[List, operator.add]` so parallel agents merge state safely without overwrites.
+- **AST parsing over regex** — Code analysis uses Python's `ast` module to extract class definitions, imports, and graph structure with precision, not fragile regex patterns.
+- **Sandboxed cloning** — All git operations run inside `tempfile.TemporaryDirectory()` using `subprocess.run()` with full error handling. No `os.system()` calls.
 
 ## Project Structure
 
 ```
-automaton-auditor/
+automaton-auditor-swarm/
+├── main.py                     # CLI entry point
+├── pyproject.toml              # Dependencies (managed via uv)
+├── uv.lock                     # Locked dependency versions for reproducible installs
+├── .env.example                # Required environment variables (copy to .env)
+├── rubric/
+│   └── week2_rubric.json       # Machine-readable evaluation rubric
 ├── src/
-│   ├── state.py              # Evidence, JudicialOpinion, AgentState with reducers
-│   ├── graph.py              # StateGraph: parallel fan-out → EvidenceAggregator fan-in
+│   ├── state.py                # Pydantic/TypedDict state definitions with Annotated reducers
+│   ├── graph.py                # StateGraph with fan-out/fan-in, conditional edges, checkpointing
 │   ├── nodes/
-│   │   └── detectives.py     # RepoInvestigator, DocAnalyst, VisionInspector
+│   │   ├── detectives.py       # RepoInvestigator & DocAnalyst nodes
+│   │   ├── judges.py           # Prosecutor, Defense, TechLead (stub — final submission)
+│   │   └── justice.py          # ChiefJustice synthesis (stub — final submission)
 │   └── tools/
-│       ├── repo_tools.py     # Sandboxed git clone, git log, AST analysis
-│       └── doc_tools.py      # PDF ingestion, RAG-lite chunking, concept querying
-├── rubric.json               # Machine-readable rubric loaded by ContextBuilder
-├── reports/
-│   └── interim_report.pdf   # Interim architectural report
-├── pyproject.toml            # uv-managed dependencies
-├── .env.example              # Environment variable template (no secrets)
-└── README.md
+│       ├── repo_tools.py       # Sandboxed git clone, AST analysis, security scanning
+│       └── doc_tools.py        # PDF ingestion, paragraph chunking, RAG-lite query
+└── reports/
+    └── interim_report.pdf      # Interim architectural report
 ```
 
----
+## Setup
 
-## Troubleshooting
+### Prerequisites
 
-**`ModuleNotFoundError: No module named 'src'`**
-Run from the project root with `uv pip install -e .` completed. The `-e` flag makes `src/` importable.
+- **Python 3.11+** (check with `python --version`)
+- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- Git CLI (`git --version`)
+- **[Ollama](https://ollama.ai/)** running locally
+- MiniMax M2.5 model pulled: `ollama pull minimax-m2.5:cloud`
 
-**`git clone failed: Repository not found`**
-The target repo must be public. Private repos require SSH key setup and will time out after 120 seconds.
+### Installation
 
-**`PDF not found at path: ...`**
-The `pdf_path` argument is a local path on your machine. Download the peer's PDF first, then pass its local path.
+```bash
+# 1. Clone the repository
+git clone https://github.com/atnabon/automaton-auditor-swarm.git
+cd automaton-auditor-swarm
 
-**LangSmith traces not appearing**
-Confirm `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` are both set in `.env` and that `load_dotenv()` is called before importing from `src`.
+# 2. Install all dependencies from the lock file (exact versions, reproducible)
+uv sync
+
+# 3. Configure environment variables
+cp .env.example .env
+# Open .env in your editor and fill in GITHUB_TOKEN, LANGCHAIN_API_KEY, etc.
+```
+
+> **Tip:** `uv sync` reads `uv.lock` to install the exact pinned dependency versions,
+> ensuring the same environment on every machine. For a plain pip install (no lock):
+> `pip install -e .`
+
+### Environment Variables
+
+| Variable               | Required | Description                                        |
+| ---------------------- | -------- | -------------------------------------------------- |
+| `OLLAMA_BASE_URL`      | No       | Ollama API URL (default: `http://localhost:11434`) |
+| `OLLAMA_MODEL`         | No       | Ollama model name (default: `minimax2.5`)          |
+| `LANGCHAIN_TRACING_V2` | No       | Set to `true` for LangSmith tracing                |
+| `LANGCHAIN_API_KEY`    | No       | LangSmith API key                                  |
+| `LANGCHAIN_PROJECT`    | No       | LangSmith project name                             |
+| `GITHUB_TOKEN`         | No       | GitHub PAT for private repositories                |
+
+## Usage
+
+### Run the Detective Graph
+
+```bash
+# Audit a public repository (detective phase only)
+python main.py https://github.com/user/target-repo
+
+# With a PDF report
+python main.py https://github.com/user/target-repo --pdf reports/their_report.pdf
+
+# Verbose output
+python main.py https://github.com/user/target-repo --pdf report.pdf -v
+```
+
+### Example Output
+
+```
+🔍 Automaton Auditor Swarm — Detective Phase
+   Target repo : https://github.com/user/target-repo
+   PDF report  : reports/their_report.pdf
+
+📋 Evidence Summary (7 items):
+
+  ✅ git_forensic_analysis
+     Location   : git log
+     Confidence : 95%
+     Preview    : ["abc1234 2025-02-20T10:00:00Z Initial project setup", ...]
+
+  ✅ state_management_rigor
+     Location   : src/state.py
+     Confidence : 90%
+     Preview    : Pydantic BaseModel classes: ['Evidence', 'JudicialOpinion']...
+
+  ✅ graph_orchestration
+     Location   : src/graph.py
+     Confidence : 85%
+     Preview    : Nodes: ['repo_investigator', 'doc_analyst', ...]...
+
+✅ Detective phase complete.
+```
+
+## Current Status (Interim)
+
+### Implemented ✅
+
+- `src/state.py` — Full Pydantic/TypedDict state definitions with Annotated reducers
+- `src/tools/repo_tools.py` — Sandboxed git clone, git log extraction, AST-based analysis
+- `src/tools/doc_tools.py` — PDF ingestion, keyword search, path extraction
+- `src/nodes/detectives.py` — RepoInvestigator and DocAnalyst as LangGraph nodes
+- `src/graph.py` — StateGraph with detective fan-out/fan-in and checkpointing
+- `rubric/rubric.json` — Full machine-readable rubric
+
+### Planned for Final Submission 🔜
+
+- `src/nodes/judges.py` — Three parallel judge personas (Prosecutor, Defense, TechLead)
+- `src/nodes/justice.py` — ChiefJustice with deterministic synthesis rules
+- VisionInspector detective for diagram analysis
+- Conditional edges for error handling
+- Full Markdown report rendering
+- LangSmith trace integration
