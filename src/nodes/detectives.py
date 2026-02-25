@@ -382,7 +382,7 @@ def RepoInvestigator(state: AgentState) -> List[Evidence]:
                 evidences.append(
                     Evidence(
                         goal="Verify no os.system() shell injection vectors",
-                        found=True,  # found a VIOLATION — this is bad
+                        found=False,
                         content=v["violation"],
                         location=f"{v['file']}:{v['line']}",
                         rationale=(
