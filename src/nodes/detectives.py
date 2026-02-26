@@ -37,7 +37,7 @@ REQUIRED_INTERIM_FILES = [
 REQUIRED_FINAL_FILES = REQUIRED_INTERIM_FILES + [
     "src/nodes/judges.py",
     "src/nodes/justice.py",
-    "rubric.json",
+    "rubric/rubric.json",
 ]
 
 
@@ -573,11 +573,70 @@ def doc_analyst(state: AgentState) -> List[Evidence]:
             )
         )
 
+    # --- Optional: LLM-based Deep Concept Verification ---
+    # Per the doc: "Scan for deep understanding... Does the text just drop the keyword, or does it explain how the architecture executes it?"
+    # If LLM is available, we add a "Deep Verification" layer to the DocAnalyst.
+    try:
+        from src.llm import get_llm
+        from langchain_core.messages import HumanMessage
+        
+        # Resolve LLM for doc role
+        doc_llm = get_llm(role="doc", temperature=0.1)
+        logger.info("DocAnalyst: LLM available, performing deep concept verification")
+
+        for concept, qr in concept_results.items():
+            if qr["found"] and qr["top_chunks"]:
+                top_text = "\n\n".join([f"Page {c['page']}: {c['text']}" for c in qr["top_chunks"]])
+                prompt = (
+                    f"Analyze the following text chunks from a technical report regarding the concept: '{concept}'.\n\n"
+                    f"Text:\n{top_text}\n\n"
+                    f"Does the author provide a SUBSTANTIVE explanation of how they implemented or used '{concept}'? "
+                    f"Answer with 'YES' or 'NO' and a 1-sentence explanation."
+                )
+                import time
+                backoff = 1.0
+                for attempt in range(1, 4):
+                    try:
+                        response = doc_llm.invoke([HumanMessage(content=prompt)])
+                        # Update evidence based on LLM "second opinion"
+                        is_substantive = "yes" in response.content.lower()[:5]
+                        evidences.append(Evidence(
+                            goal=f"LLM Deep Verification: {concept}",
+                            found=is_substantive,
+                            content=response.content,
+                            location=pdf_path,
+                            rationale=(
+                                f"LLM analyzed the top chunks for '{concept}'. "
+                                f"Verdict: {'Substantive explanation found' if is_substantive else 'Potential keyword dropping detected'}."
+                            ),
+                            confidence=0.8
+                        ))
+                        break
+                    except Exception as e:
+                        if "429" in str(e) or "too many requests" in str(e).lower():
+                            logger.info("DocAnalyst rate limited for %s. Backing off %.1fs...", concept, backoff)
+                            time.sleep(backoff)
+                            backoff *= 2.0
+                        else:
+                            logger.debug("DocLLM failed for concept %s: %s", concept, e)
+                            break
+
+    except Exception as exc:
+        logger.debug("DocAnalyst: LLM deep verification skipped or failed: %s", exc)
+
     logger.info("DocAnalyst collected %d evidence items", len(evidences))
     return {"evidences": {"doc": evidences}}
 
 
 def vision_inspector_node(state: AgentState) -> Dict[str, Any]:
+    """LangGraph node: VisionInspector — The Diagram Detective.
+
+    Extracts images from the PDF and optionally classifies them using
+    a multimodal LLM to determine if they show parallel StateGraph flow.
+
+    Per the doc: "implementation required, execution optional" — the code
+    path exists but degrades gracefully if multimodal LLM isn't available.
+    """
 
     pdf_path = state.get("pdf_path", "")
     evidences: List[Evidence] = []
@@ -598,39 +657,135 @@ def vision_inspector_node(state: AgentState) -> Dict[str, Any]:
     images = extract_images_from_pdf(pdf_path)
     image_count = len(images)
 
-    # Confidence reflects how much we actually know:
-    # - 0 images: we found nothing to classify — low confidence (ambiguous)
-    # - images found but not classified: we know they exist, but not what they show
-    # The stub cannot claim high confidence because classification hasn't run.
     if image_count == 0:
-        conf = 0.4  # PDF parsed but no images — could mean no diagrams exist
-        rationale = (
-            "No images extracted from PDF. Either no diagrams are present or "
-            "extraction failed. [signal: image_count=0, classification=not_run]"
+        evidences.append(
+            Evidence(
+                goal="Classify architectural diagrams for parallel StateGraph flow",
+                found=False,
+                content="No images extracted from PDF.",
+                location=pdf_path,
+                rationale=(
+                    "No images extracted from PDF. Either no diagrams are present or "
+                    "extraction failed. [signal: image_count=0]"
+                ),
+                confidence=0.4,
+            )
         )
-        found = False
-    else:
-        # We found images but haven't classified them — we know they exist,
-        # we don't know if they show parallel flow. Confidence stays low.
-        conf = round(min(0.2 + (image_count * 0.05), 0.4), 2)
-        rationale = (
-            f"{image_count} image(s) extracted from PDF. "
-            f"Multimodal LLM classification not yet executed — "
-            f"cannot determine if diagrams show parallel StateGraph flow. "
-            f"[signals: image_count={image_count}, classification=stub, "
-            f"confidence grows slightly with image count but stays low until classification runs]"
-        )
-        found = True
+        return {"evidences": {"vision": evidences}}
 
-    evidences.append(
-        Evidence(
-            goal="Classify architectural diagrams for parallel StateGraph flow",
-            found=found,
-            content=f"{image_count} image(s) extracted. Classification deferred to final submission.",
-            location=pdf_path,
-            rationale=rationale,
-            confidence=conf,
+    # Attempt LLM-based image classification
+    classification_results = []
+    llm_available = False
+
+    try:
+        import base64
+        from src.llm import get_llm
+        from langchain_core.messages import HumanMessage
+
+        vision_llm = get_llm(role="vision", temperature=0.1)
+        llm_available = True
+        logger.info("VisionInspector: multimodal LLM available, classifying %d images", image_count)
+
+        for i, img_data in enumerate(images[:5]):  # Limit to 5 images
+            try:
+                # img_data is a dict with 'image' (bytes) and 'metadata'
+                if isinstance(img_data, dict) and "image" in img_data:
+                    img_bytes = img_data["image"]
+                    img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+                    # Determine format from metadata or default to png
+                    img_format = img_data.get("metadata", {}).get("format", "png")
+
+                    message = HumanMessage(
+                        content=[
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Analyze this diagram from a software engineering report. "
+                                    "Answer these questions:\n"
+                                    "1. Is this a StateGraph or workflow diagram? (yes/no)\n"
+                                    "2. Does it show parallel branches (fan-out/fan-in)? (yes/no)\n"
+                                    "3. Does it show: Detectives -> Evidence Aggregation -> "
+                                    "Judges -> Synthesis flow? (yes/no)\n"
+                                    "4. Is it a simple linear pipeline? (yes/no)\n"
+                                    "Respond concisely."
+                                ),
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/{img_format};base64,{img_b64}"
+                                },
+                            },
+                        ]
+                    )
+
+                    response = vision_llm.invoke([message])
+                    classification_results.append({
+                        "image_index": i,
+                        "classification": response.content,
+                    })
+                    logger.info("VisionInspector: classified image %d", i)
+
+            except Exception as img_exc:
+                logger.warning("VisionInspector: failed to classify image %d: %s", i, img_exc)
+                classification_results.append({
+                    "image_index": i,
+                    "classification": f"Classification failed: {img_exc}",
+                })
+
+    except ImportError:
+        logger.info("VisionInspector: multimodal LLM not available, using stub")
+    except Exception as exc:
+        logger.warning("VisionInspector: LLM init failed, falling back to stub: %s", exc)
+
+    # Build evidence based on classification results
+    if classification_results:
+        # Check if any image shows parallel StateGraph flow
+        has_parallel = any(
+            "yes" in r.get("classification", "").lower()
+            and "parallel" in r.get("classification", "").lower()
+            for r in classification_results
         )
-    )
+
+        classification_text = "\n".join(
+            f"Image {r['image_index']}: {r['classification'][:200]}"
+            for r in classification_results
+        )
+
+        conf = 0.7 if has_parallel else 0.5
+        evidences.append(
+            Evidence(
+                goal="Classify architectural diagrams for parallel StateGraph flow",
+                found=has_parallel,
+                content=f"{image_count} image(s) extracted, {len(classification_results)} classified.\n{classification_text}",
+                location=pdf_path,
+                rationale=(
+                    f"Multimodal LLM classified {len(classification_results)} images. "
+                    f"Parallel flow {'detected' if has_parallel else 'not detected'}. "
+                    f"[confidence {conf}: LLM classification]"
+                ),
+                confidence=conf,
+            )
+        )
+    else:
+        # Fallback: images found but not classified
+        conf = round(min(0.2 + (image_count * 0.05), 0.4), 2)
+        evidences.append(
+            Evidence(
+                goal="Classify architectural diagrams for parallel StateGraph flow",
+                found=True,
+                content=f"{image_count} image(s) extracted. LLM classification not available.",
+                location=pdf_path,
+                rationale=(
+                    f"{image_count} image(s) extracted from PDF. "
+                    f"Multimodal LLM classification {'failed' if llm_available else 'not available'} -- "
+                    f"cannot determine if diagrams show parallel StateGraph flow. "
+                    f"[confidence {conf}: extraction only, no classification]"
+                ),
+                confidence=conf,
+            )
+        )
 
     return {"evidences": {"vision": evidences}}
+
