@@ -166,7 +166,26 @@ trp1-automation-auditor/
 
 ---
 
-## ⚖️ The Constitution (Synthesis Rules)
+### 🐳 Docker Usage (Optional)
+
+If you prefer to run the auditor in a container, a `Dockerfile` is provided:
+
+1. **Build the image:**
+
+    ```bash
+    docker build -t automaton-auditor .
+    ```
+
+2. **Run the auditor:**
+    ```bash
+    # Map your .env file and output directories
+    docker run --env-file .env \
+      -v $(pwd)/audit:/app/audit \
+      -v $(pwd)/reports:/app/reports \
+      automaton-auditor https://github.com/user/repo --pdf reports/interim.pdf
+    ```
+
+## 📜 Synthesis Rules
 
 The Chief Justice enforces these deterministic rules from `rubric.json`:
 
