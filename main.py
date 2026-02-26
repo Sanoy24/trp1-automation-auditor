@@ -147,20 +147,14 @@ def main() -> None:
     report = final_state.get("final_report")
     if report:
         try:
-            # 1. Save Markdown Report (atomic write inside helper)
+            # Save Markdown Report (the task doc requires Markdown output)
             output_path = os.path.join(args.output_dir, "audit_report.md")
             render_audit_report(report, output_path)
-
-            # 2. Save JSON Report (Structured Output requirement)
-            json_path = os.path.join(args.output_dir, "audit_report.json")
-            with open(json_path, "w", encoding="utf-8") as f:
-                f.write(report.model_dump_json(indent=2))
 
             logger.info("=" * 60)
             logger.info("AUDIT COMPLETE")
             logger.info("   Overall Score: %.1f / 5.0", report.overall_score)
-            logger.info("   Markdown:      %s", output_path)
-            logger.info("   JSON (Data):   %s", json_path)
+            logger.info("   Report:        %s", output_path)
             logger.info("=" * 60)
         except KeyboardInterrupt:
             logger.warning(
