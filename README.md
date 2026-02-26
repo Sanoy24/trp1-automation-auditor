@@ -1,158 +1,191 @@
-# Automaton Auditor Swarm
+# 🏛️ Automaton Auditor — Digital Courtroom for Code Governance
 
-An agentic swarm built on **LangGraph** that audits GitHub repositories and PDF reports using a dialectical judicial framework. Three detective agents collect forensic evidence in parallel, three judge personas deliberate with conflicting philosophies, and a Chief Justice synthesises the final verdict using deterministic rules.
+A production-grade **Autonomous Governance Swarm** built on **LangGraph**. It performs deep forensic audits of GitHub repositories and PDF technical reports using a hierarchical multi-agent architecture modelled as a **Digital Courtroom**.
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 START
-  │
-  ├──► RepoInvestigator (code detective)  ──┐
-  │                                          │
-  └──► DocAnalyst (document detective)     ──┤
-                                             │
-                          EvidenceAggregator  (fan-in sync)
-                                             │
-                   ┌─────────────────────────┤
-                   │            │             │
-              Prosecutor    Defense      TechLead     ← fan-out (TODO)
-                   │            │             │
-                   └─────────────────────────┤
-                                             │
-                                    ChiefJustice (TODO)
-                                             │
-                                            END
+  ├──► RepoInvestigator  ──┐
+  ├──► DocAnalyst         ──┤       (Detective Fan-Out)
+  └──► VisionInspector    ──┤
+                             │
+               EvidenceAggregator    (Fan-In Sync)
+                             │
+                   [conditional routing]
+                      ├── error ──► END
+                      └── ok    ──► JudgeDispatch
+                                       │
+                       ┌───────────────┼───────────────┐
+                       ▼               ▼               ▼
+                  Prosecutor       Defense         TechLead   (Judge Fan-Out)
+                       │               │               │
+                       └───────────────┼───────────────┘
+                                       ▼
+                                JudgeSyncPoint
+                                       │
+                                 ChiefJustice             (Synthesis)
+                                       │
+                                  ReportNode
+                                       │
+                                      END
 ```
 
-### Key Design Decisions
+### Layer 1 — Detective Layer (Forensic Evidence Collection)
 
-- **Pydantic over dicts** — `Evidence` and `JudicialOpinion` are strict `BaseModel` classes with typed fields, ensuring validation at every boundary instead of brittle nested dicts.
-- **Annotated reducers** — `AgentState` uses `Annotated[Dict, operator.ior]` and `Annotated[List, operator.add]` so parallel agents merge state safely without overwrites.
-- **AST parsing over regex** — Code analysis uses Python's `ast` module to extract class definitions, imports, and graph structure with precision, not fragile regex patterns.
-- **Sandboxed cloning** — All git operations run inside `tempfile.TemporaryDirectory()` using `subprocess.run()` with full error handling. No `os.system()` calls.
+- **RepoInvestigator:** AST-based code analysis (not regex), sandboxed `git clone`, commit history extraction.
+- **DocAnalyst:** PDF ingestion + RAG-lite chunked querying, cross-references file paths against repo evidence.
+- **VisionInspector:** Multimodal LLM diagram classification (implementation required, execution optional).
 
-## Project Structure
+### Layer 2 — Judicial Layer (Dialectical Bench)
 
-```
-automaton-auditor-swarm/
-├── main.py                     # CLI entry point
-├── pyproject.toml              # Dependencies (managed via uv)
-├── uv.lock                     # Locked dependency versions for reproducible installs
-├── .env.example                # Required environment variables (copy to .env)
-├── rubric/
-│   └── week2_rubric.json       # Machine-readable evaluation rubric
-├── src/
-│   ├── state.py                # Pydantic/TypedDict state definitions with Annotated reducers
-│   ├── graph.py                # StateGraph with fan-out/fan-in, conditional edges, checkpointing
-│   ├── nodes/
-│   │   ├── detectives.py       # RepoInvestigator & DocAnalyst nodes
-│   │   ├── judges.py           # Prosecutor, Defense, TechLead (stub — final submission)
-│   │   └── justice.py          # ChiefJustice synthesis (stub — final submission)
-│   └── tools/
-│       ├── repo_tools.py       # Sandboxed git clone, AST analysis, security scanning
-│       └── doc_tools.py        # PDF ingestion, paragraph chunking, RAG-lite query
-└── reports/
-    └── interim_report.pdf      # Interim architectural report
-```
+Three judges analyze the **same evidence** for **each rubric criterion** independently:
 
-## Setup
+- **Prosecutor** — "Trust No One. Assume Vibe Coding." Harsh scores (1–3).
+- **Defense Attorney** — "Reward Effort and Intent." Generous scores (3–5).
+- **Tech Lead** — "Does it actually work?" Decisive scores (1, 3, or 5).
+
+All judges use `.with_structured_output(JudicialOpinion)` with retry + regex fallback.
+
+### Layer 3 — Supreme Court (Synthesis Engine)
+
+The **ChiefJustice** applies deterministic Python rules (not LLM prompts) to resolve conflicts:
+
+- **Rule of Security:** `os.system` or shell injection → score capped at 3.
+- **Rule of Evidence:** Detective facts overrule Defense opinions (fact supremacy).
+- **Rule of Functionality:** Tech Lead carries highest weight for architecture criteria.
+- **Dissent Requirement:** Score variance > 2 triggers mandatory dissent summary.
+
+---
+
+## 🛠️ Setup & Installation
 
 ### Prerequisites
 
-- **Python 3.11+** (check with `python --version`)
-- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- Git CLI (`git --version`)
-- **[Ollama](https://ollama.ai/)** running locally
-- MiniMax M2.5 model pulled: `ollama pull minimax-m2.5:cloud`
+- Python 3.13+
+- [uv](https://docs.astral.sh/uv/) package manager
+- An LLM provider: **Ollama** (local), **Groq**, **OpenAI**, **Anthropic**, or **Google Gemini**
 
-### Installation
+### Install Dependencies
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/atnabon/automaton-auditor-swarm.git
-cd automaton-auditor-swarm
-
-# 2. Install all dependencies from the lock file (exact versions, reproducible)
+git clone https://github.com/<your-username>/trp1-automation-auditor.git
+cd trp1-automation-auditor
 uv sync
-
-# 3. Configure environment variables
-cp .env.example .env
-# Open .env in your editor and fill in GITHUB_TOKEN, LANGCHAIN_API_KEY, etc.
 ```
 
-> **Tip:** `uv sync` reads `uv.lock` to install the exact pinned dependency versions,
-> ensuring the same environment on every machine. For a plain pip install (no lock):
-> `pip install -e .`
-
-### Environment Variables
-
-| Variable               | Required | Description                                        |
-| ---------------------- | -------- | -------------------------------------------------- |
-| `OLLAMA_BASE_URL`      | No       | Ollama API URL (default: `http://localhost:11434`) |
-| `OLLAMA_MODEL`         | No       | Ollama model name (default: `minimax2.5`)          |
-| `LANGCHAIN_TRACING_V2` | No       | Set to `true` for LangSmith tracing                |
-| `LANGCHAIN_API_KEY`    | No       | LangSmith API key                                  |
-| `LANGCHAIN_PROJECT`    | No       | LangSmith project name                             |
-| `GITHUB_TOKEN`         | No       | GitHub PAT for private repositories                |
-
-## Usage
-
-### Run the Detective Graph
+### Configure Environment
 
 ```bash
-# Audit a public repository (detective phase only)
-python main.py https://github.com/user/target-repo
-
-# With a PDF report
-python main.py https://github.com/user/target-repo --pdf reports/their_report.pdf
-
-# Verbose output
-python main.py https://github.com/user/target-repo --pdf report.pdf -v
+cp .env.example .env
+# Edit .env with your API keys and preferred LLM provider
 ```
 
-### Example Output
+---
 
-```
-🔍 Automaton Auditor Swarm — Detective Phase
-   Target repo : https://github.com/user/target-repo
-   PDF report  : reports/their_report.pdf
+## 🚀 Usage
 
-📋 Evidence Summary (7 items):
+### Audit Your Own Repository (Self-Audit)
 
-  ✅ git_forensic_analysis
-     Location   : git log
-     Confidence : 95%
-     Preview    : ["abc1234 2025-02-20T10:00:00Z Initial project setup", ...]
-
-  ✅ state_management_rigor
-     Location   : src/state.py
-     Confidence : 90%
-     Preview    : Pydantic BaseModel classes: ['Evidence', 'JudicialOpinion']...
-
-  ✅ graph_orchestration
-     Location   : src/graph.py
-     Confidence : 85%
-     Preview    : Nodes: ['repo_investigator', 'doc_analyst', ...]...
-
-✅ Detective phase complete.
+```bash
+uv run python main.py . --pdf reports/Week-two-interim-report.pdf
 ```
 
-## Current Status (Interim)
+### Audit a Peer's Repository
 
-### Implemented ✅
+```bash
+uv run python main.py https://github.com/peer/repo \
+  --pdf path/to/peer_report.pdf \
+  --output-dir audit/report_onpeer_generated
+```
 
-- `src/state.py` — Full Pydantic/TypedDict state definitions with Annotated reducers
-- `src/tools/repo_tools.py` — Sandboxed git clone, git log extraction, AST-based analysis
-- `src/tools/doc_tools.py` — PDF ingestion, keyword search, path extraction
-- `src/nodes/detectives.py` — RepoInvestigator and DocAnalyst as LangGraph nodes
-- `src/graph.py` — StateGraph with detective fan-out/fan-in and checkpointing
-- `rubric/rubric.json` — Full machine-readable rubric
+### CLI Options
 
-### Planned for Final Submission 🔜
+| Flag               | Description                              | Default                         |
+| ------------------ | ---------------------------------------- | ------------------------------- |
+| `repo_url`         | GitHub URL or local path to audit        | _(required)_                    |
+| `--pdf`            | Path to PDF report for cross-referencing | `None`                          |
+| `--output-dir`     | Directory for generated reports          | `audit/report_onself_generated` |
+| `--rubric`         | Path to `rubric.json`                    | `rubric/rubric.json`            |
+| `-v` / `--verbose` | Enable debug logging                     | `False`                         |
 
-- `src/nodes/judges.py` — Three parallel judge personas (Prosecutor, Defense, TechLead)
-- `src/nodes/justice.py` — ChiefJustice with deterministic synthesis rules
-- VisionInspector detective for diagram analysis
-- Conditional edges for error handling
-- Full Markdown report rendering
-- LangSmith trace integration
+### Output
+
+The auditor generates two files in the output directory:
+
+- **`audit_report.md`** — Human-readable Markdown (Executive Summary → Criterion Breakdown → Remediation Plan)
+- **`audit_report.json`** — Machine-readable Pydantic-validated JSON
+
+---
+
+## 📁 Project Structure
+
+```
+trp1-automation-auditor/
+├── main.py                         # CLI entry point
+├── pyproject.toml                  # uv-managed dependencies
+├── .env.example                    # Required environment variables
+├── rubric/
+│   └── rubric.json                 # Machine-readable rubric (the "Constitution")
+├── src/
+│   ├── state.py                    # Pydantic/TypedDict state definitions
+│   ├── graph.py                    # Complete LangGraph StateGraph wiring
+│   ├── llm.py                      # Dynamic multi-provider LLM factory
+│   ├── report_generator.py         # Markdown serializer for AuditReport
+│   ├── nodes/
+│   │   ├── detectives.py           # RepoInvestigator, DocAnalyst, VisionInspector
+│   │   ├── judges.py               # Prosecutor, Defense, TechLead
+│   │   └── justice.py              # ChiefJustice synthesis engine
+│   └── tools/
+│       ├── repo_tools.py           # Sandboxed git clone, AST parsing
+│       └── doc_tools.py            # PDF ingestion, RAG-lite chunking
+├── audit/
+│   ├── report_onself_generated/    # Self-audit output
+│   ├── report_onpeer_generated/    # Peer-audit output
+│   └── report_bypeer_received/     # Report received from peer's agent
+├── reports/
+│   └── Week-two-interim-report.pdf # Interim PDF report
+└── docs/
+    └── TRP1 Challenge Week 2.md    # Task specification
+```
+
+---
+
+## ⚙️ Configuration (.env)
+
+| Variable               | Description                  | Example                              |
+| ---------------------- | ---------------------------- | ------------------------------------ |
+| `LLM_PROVIDER`         | Default LLM provider         | `ollama`, `groq`, `openai`, `google` |
+| `LLM_MODEL`            | Default model                | `qwen2.5`, `llama-3.3-70b-versatile` |
+| `JUDGE_LLM_PROVIDER`   | Override provider for judges | `groq`                               |
+| `JUDGE_LLM_MODEL`      | Override model for judges    | `llama-3.3-70b-versatile`            |
+| `GROQ_API_KEY`         | Groq Cloud API key           | `gsk_...`                            |
+| `GOOGLE_API_KEY`       | Google Gemini API key        | `AIza...`                            |
+| `LANGCHAIN_TRACING_V2` | Enable LangSmith tracing     | `true` / `false`                     |
+| `LANGCHAIN_API_KEY`    | LangSmith API key            | `lsv2_pt_...`                        |
+
+---
+
+## ⚖️ The Constitution (Synthesis Rules)
+
+The Chief Justice enforces these deterministic rules from `rubric.json`:
+
+1. **Rule of Security** — Confirmed security flaws (e.g., raw `os.system`) cap the score at 3, overriding Defense arguments.
+2. **Rule of Evidence** — Forensic facts always overrule subjective judicial opinions. Defense claims without Detective support are overruled.
+3. **Rule of Functionality** — Tech Lead's assessment carries highest weight for architecture criteria.
+4. **Dissent Requirement** — Any criterion with score variance > 2 includes a mandatory dissent summary explaining why one side was overruled.
+
+---
+
+## 🚀 Key Features
+
+- **Dynamic Multi-LLM Factory:** Route requests to Ollama, Groq, OpenAI, Anthropic, or Gemini per-node.
+- **AST-First Forensics:** Uses Python's `ast` module for objective code analysis (no brittle regex).
+- **Robust State Reducers:** `operator.add` / `operator.ior` prevent parallel data races.
+- **Fail-Safe JSON Enforcement:** Schema hints + regex fallback for structured output from any model.
+- **Swarm Resilience:** Exponential backoff handles 429 rate limits during parallel fan-out.
+- **LangSmith Observability:** Native tracing for debugging multi-agent reasoning chains.
+
+---
+
+_Built for the TRP1 Challenge Week 2 — Orchestrating Deep LangGraph Swarms for Autonomous Governance._
