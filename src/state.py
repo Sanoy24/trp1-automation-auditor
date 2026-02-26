@@ -106,4 +106,8 @@ class AgentState(TypedDict):
     # Parallel-safe: list append — each judge appends its opinions
     opinions: Annotated[List[JudicialOpinion], operator.add]
 
-    final_report: AuditReport
+    final_report: Optional[AuditReport]
+
+    # Error propagation — set by any node that encounters a fatal failure
+    error: Optional[str]
+
