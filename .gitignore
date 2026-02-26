@@ -10,3 +10,5 @@ wheels/
 .venv
 docs/
 .env
+final_report.md
+peer/
