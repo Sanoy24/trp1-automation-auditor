@@ -78,15 +78,39 @@ def _evidence_supports_claim(
     """Check if detective evidence actually supports the claims for a criterion.
 
     Returns True if at least one evidence item for this criterion area
-    has found=True.  Returns False if evidence is missing or contradicts.
+    has found=True and relates to the criterion topic.
     """
-    # Map criterion IDs to evidence goals/locations they relate to
+    # Build search terms from the criterion ID
+    # e.g. "git_forensic_analysis" -> ["git", "forensic", "analysis", "commit"]
+    base_terms = criterion_id.replace("_", " ").lower().split()
+
+    # Additional keyword mappings for common criterion topics
+    KEYWORD_MAP = {
+        "git": ["commit", "git", "history", "log", "progression"],
+        "state": ["state", "pydantic", "typeddict", "reducer", "basemodel", "agentstate"],
+        "graph": ["graph", "stategraph", "edge", "node", "fan-out", "fan-in", "parallel"],
+        "safe": ["sandbox", "tempfile", "subprocess", "clone", "security"],
+        "structured": ["structured", "json", "pydantic", "with_structured_output", "bind_tools"],
+        "judicial": ["judge", "prosecutor", "defense", "techlead", "persona"],
+        "chief": ["chief", "justice", "synthesis", "conflict", "resolution"],
+        "theoretical": ["dialectical", "metacognition", "fan-in", "fan-out", "synchronization"],
+        "report": ["report", "pdf", "file", "path", "cross-reference"],
+        "swarm": ["diagram", "visual", "architecture", "image"],
+    }
+
+    # Expand search terms with mapped keywords
+    search_terms = set(base_terms)
+    for term in base_terms:
+        if term in KEYWORD_MAP:
+            search_terms.update(KEYWORD_MAP[term])
+
     for source, evidence_list in evidences.items():
         for ev in evidence_list:
-            if ev.found and (
-                criterion_id.replace("_", " ") in ev.goal.lower()
-                or criterion_id.replace("_", " ") in ev.location.lower()
-            ):
+            if not ev.found:
+                continue
+            # Check if ANY search term appears in the evidence goal, location, or rationale
+            text_to_search = f"{ev.goal} {ev.location} {ev.rationale}".lower()
+            if any(term in text_to_search for term in search_terms):
                 return True
     return False
 
