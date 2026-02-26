@@ -14,7 +14,7 @@ def clone_repo_sandboxed(repo_url: str) -> Tuple[str, Optional[str]]:
     tmp_dir = tempfile.mkdtemp(prefix="auditor_clone_")
     try:
         result = subprocess.run(
-            ["git", "clone", "--depth=1", repo_url, tmp_dir],
+            ["git", "clone", repo_url, tmp_dir],
             capture_output=True,
             text=True,
             timeout=120,
