@@ -39,7 +39,9 @@ load_dotenv()
 def _sigint_handler(signum, frame):
     """Handle Ctrl+C by forcefully killing the process."""
     print("\n" + "!" * 60, file=sys.stderr)
-    print("AUDIT INTERRUPTED BY USER (Ctrl+C). Force-killing process...", file=sys.stderr)
+    print(
+        "AUDIT INTERRUPTED BY USER (Ctrl+C). Force-killing process...", file=sys.stderr
+    )
     print("!" * 60, file=sys.stderr)
     os._exit(130)  # 128 + SIGINT(2) = 130
 
@@ -136,6 +138,7 @@ def main() -> None:
             pdf_path=args.pdf_path,
             rubric_path=args.rubric_path,
             thread_id=args.thread_id,
+            output_dir=args.output_dir,
         )
     except KeyboardInterrupt:
         logger.warning("\n" + "!" * 60)
