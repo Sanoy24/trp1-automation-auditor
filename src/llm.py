@@ -53,8 +53,12 @@ T = TypeVar("T", bound=BaseModel)
 # ---------------------------------------------------------------------------
 
 DEFAULT_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")
-DEFAULT_MODEL: str = os.getenv("LLM_MODEL", os.getenv("OLLAMA_MODEL", "minimax-m2:cloud"))
-DEFAULT_BASE_URL: str = os.getenv("LLM_BASE_URL", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
+DEFAULT_MODEL: str = os.getenv(
+    "LLM_MODEL", os.getenv("OLLAMA_MODEL", "minimax-m2:cloud")
+)
+DEFAULT_BASE_URL: str = os.getenv(
+    "LLM_BASE_URL", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+)
 
 # Role-specific overrides
 ROLE_CONFIG = {
@@ -94,6 +98,7 @@ def _resolve_config(role: Optional[str] = None) -> dict:
 def _create_ollama(model: str, temperature: float):
     """Create a ChatOllama instance."""
     from langchain_ollama import ChatOllama
+
     tracer = _maybe_get_tracer()
     kwargs = dict(
         model=model,
@@ -215,6 +220,7 @@ def _maybe_get_tracer():
 
         # Lazy-import tracer classes
         from langchain_core.tracers.langchain import LangChainTracer
+
         # Build a langsmith client if api key present so tracer can post runs
         api_key = os.getenv("LANGCHAIN_API_KEY") or os.getenv("LANGSMITH_API_KEY")
         endpoint = os.getenv("LANGSMITH_ENDPOINT")
@@ -223,7 +229,11 @@ def _maybe_get_tracer():
             try:
                 from langsmith import Client as LangSmithClient
 
-                client = LangSmithClient(api_key=api_key, host_url=endpoint) if endpoint else LangSmithClient(api_key=api_key)
+                client = (
+                    LangSmithClient(api_key=api_key, host_url=endpoint)
+                    if endpoint
+                    else LangSmithClient(api_key=api_key)
+                )
             except Exception:
                 # Fall back to letting LangChain/langsmith use global client config
                 client = None
@@ -280,13 +290,14 @@ def get_llm(
     factory = _PROVIDERS.get(prov.lower())
     if factory is None:
         supported = ", ".join(_PROVIDERS.keys())
-        raise ValueError(
-            f"Unknown LLM provider '{prov}'. Supported: {supported}"
-        )
+        raise ValueError(f"Unknown LLM provider '{prov}'. Supported: {supported}")
 
     logger.debug(
         "Creating LLM: provider=%s, model=%s, role=%s, temperature=%.2f",
-        prov, mdl, role or "default", temperature,
+        prov,
+        mdl,
+        role or "default",
+        temperature,
     )
     return factory(mdl, temperature)
 
