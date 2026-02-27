@@ -94,13 +94,17 @@ def _resolve_config(role: Optional[str] = None) -> dict:
 def _create_ollama(model: str, temperature: float):
     """Create a ChatOllama instance."""
     from langchain_ollama import ChatOllama
-
-    return ChatOllama(
+    tracer = _maybe_get_tracer()
+    kwargs = dict(
         model=model,
         base_url=DEFAULT_BASE_URL,
         temperature=temperature,
         timeout=30,  # 30 second timeout for responsiveness
     )
+    if tracer is not None:
+        # Many LangChain Chat models accept `callbacks` to attach handlers
+        kwargs["callbacks"] = [tracer]
+    return ChatOllama(**kwargs)
 
 
 def _create_openai(model: str, temperature: float):
@@ -110,12 +114,16 @@ def _create_openai(model: str, temperature: float):
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY not set in .env")
-    return ChatOpenAI(
+    tracer = _maybe_get_tracer()
+    kwargs = dict(
         model=model,
         api_key=api_key,
         temperature=temperature,
         timeout=30,
     )
+    if tracer is not None:
+        kwargs["callbacks"] = [tracer]
+    return ChatOpenAI(**kwargs)
 
 
 def _create_anthropic(model: str, temperature: float):
@@ -125,12 +133,16 @@ def _create_anthropic(model: str, temperature: float):
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set in .env")
-    return ChatAnthropic(
+    tracer = _maybe_get_tracer()
+    kwargs = dict(
         model=model,
         api_key=api_key,
         temperature=temperature,
         timeout=30,
     )
+    if tracer is not None:
+        kwargs["callbacks"] = [tracer]
+    return ChatAnthropic(**kwargs)
 
 
 def _create_google(model: str, temperature: float):
@@ -140,12 +152,16 @@ def _create_google(model: str, temperature: float):
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise ValueError("GOOGLE_API_KEY not set in .env")
-    return ChatGoogleGenerativeAI(
+    tracer = _maybe_get_tracer()
+    kwargs = dict(
         model=model,
         google_api_key=api_key,
         temperature=temperature,
         timeout=30,
     )
+    if tracer is not None:
+        kwargs["callbacks"] = [tracer]
+    return ChatGoogleGenerativeAI(**kwargs)
 
 
 def _create_groq(model: str, temperature: float):
@@ -169,12 +185,54 @@ def _create_groq(model: str, temperature: float):
     if not api_key:
         raise ValueError("GROQ_API_KEY not set in .env")
 
-    return ChatGroq(
+    tracer = _maybe_get_tracer()
+    kwargs = dict(
         model=model,
         api_key=api_key,
         temperature=temperature,
         timeout=30,
     )
+    if tracer is not None:
+        kwargs["callbacks"] = [tracer]
+    return ChatGroq(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Tracing helper
+# ---------------------------------------------------------------------------
+
+
+def _maybe_get_tracer():
+    """Return a LangChain `LangChainTracer` instance when tracing enabled.
+
+    Uses `LANGCHAIN_TRACING_V2` and `LANGCHAIN_API_KEY` / `LANGSMITH_API_KEY`.
+    Returns None if tracing is not enabled or tracer creation fails.
+    """
+    try:
+        enabled = os.getenv("LANGCHAIN_TRACING_V2", "").lower() in ("1", "true", "yes")
+        if not enabled:
+            return None
+
+        # Lazy-import tracer classes
+        from langchain_core.tracers.langchain import LangChainTracer
+        # Build a langsmith client if api key present so tracer can post runs
+        api_key = os.getenv("LANGCHAIN_API_KEY") or os.getenv("LANGSMITH_API_KEY")
+        endpoint = os.getenv("LANGSMITH_ENDPOINT")
+        client = None
+        if api_key:
+            try:
+                from langsmith import Client as LangSmithClient
+
+                client = LangSmithClient(api_key=api_key, host_url=endpoint) if endpoint else LangSmithClient(api_key=api_key)
+            except Exception:
+                # Fall back to letting LangChain/langsmith use global client config
+                client = None
+
+        tracer = LangChainTracer(client=client)
+        return tracer
+    except Exception as exc:
+        logger.debug("LangChain tracer unavailable: %s", exc)
+        return None
 
 
 # Registry mapping provider names to constructors
