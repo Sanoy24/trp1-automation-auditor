@@ -42,11 +42,7 @@ from typing import Any, Dict, Literal, Optional
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from src.nodes.detectives import (
-    doc_analyst,
-    repo_investigator,
-    vision_inspector_node,
-)
+from src.nodes.detectives import doc_analyst, repo_investigator, vision_inspector_node
 from src.nodes.judges import defense_node, prosecutor_node, tech_lead_node
 from src.nodes.justice import chief_justice_node
 from src.report_generator import render_audit_report
@@ -109,23 +105,28 @@ def evidence_aggregator(state: AgentState) -> dict:
             if ev.content:
                 cited_paths = [p.strip() for p in ev.content.split(",") if p.strip()]
                 verified = [p for p in cited_paths if any(p in rf for rf in repo_files)]
-                hallucinated = [p for p in cited_paths if not any(p in rf for rf in repo_files)]
+                hallucinated = [
+                    p for p in cited_paths if not any(p in rf for rf in repo_files)
+                ]
 
                 if hallucinated:
-                    cross_ref_evidence.append(Evidence(
-                        goal="Cross-reference: Hallucinated file paths in PDF",
-                        found=True,
-                        content=f"Hallucinated paths: {hallucinated}. Verified: {verified}",
-                        location="evidence_aggregator/cross_reference",
-                        rationale=(
-                            f"PDF report cited {len(cited_paths)} paths. "
-                            f"{len(verified)} verified, {len(hallucinated)} not found in repo."
-                        ),
-                        confidence=0.9,
-                    ))
+                    cross_ref_evidence.append(
+                        Evidence(
+                            goal="Cross-reference: Hallucinated file paths in PDF",
+                            found=True,
+                            content=f"Hallucinated paths: {hallucinated}. Verified: {verified}",
+                            location="evidence_aggregator/cross_reference",
+                            rationale=(
+                                f"PDF report cited {len(cited_paths)} paths. "
+                                f"{len(verified)} verified, {len(hallucinated)} not found in repo."
+                            ),
+                            confidence=0.9,
+                        )
+                    )
                     logger.warning(
                         "Cross-reference found %d hallucinated paths: %s",
-                        len(hallucinated), hallucinated,
+                        len(hallucinated),
+                        hallucinated,
                     )
 
     if cross_ref_evidence:
@@ -325,6 +326,7 @@ def run_auditor_graph(
     pdf_path: Optional[str] = None,
     rubric_path: Optional[str] = None,
     thread_id: str = "audit_session_1",
+    output_dir: Optional[str] = None,
 ) -> dict:
     """Run the full auditor graph against a target repository.
 
@@ -338,6 +340,17 @@ def run_auditor_graph(
         The final AgentState dict after execution.
     """
     graph = build_auditor_graph()
+    # if caller requested a diagram, render and save
+    if output_dir:
+        try:
+            mermaid_png = graph.get_graph().draw_mermaid_png()
+            out_path = Path(output_dir) / "auditor_graph.png"
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "wb") as f:
+                f.write(mermaid_png)
+            logger.info("Saved graph diagram to %s", out_path)
+        except Exception as exc:
+            logger.warning("Failed to render graph diagram: %s", exc)
     dimensions = load_rubric(rubric_path)
 
     initial_state = {
