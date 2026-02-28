@@ -335,7 +335,7 @@ def repo_investigator(state: AgentState) -> List[Evidence]:
                         graph_analysis.get("has_state_graph", False)
                         and graph_analysis.get("fan_out_detected", False)
                     ),
-                    content=str(graph_analysis.get("add_edge_calls", [])[:10]),
+                    content=str(graph_analysis.get("add_edge_calls", [])[:20]),
                     location="src/graph.py",
                     rationale=(
                         f"AST scan results — "
@@ -367,7 +367,9 @@ def repo_investigator(state: AgentState) -> List[Evidence]:
         file_was_readable = repo_tools_source is not None
         tempfile_used = "tempfile" in (repo_tools_source or "")
         subprocess_used = "subprocess.run" in (repo_tools_source or "")
-        os_system_in_source = "os.system" in (repo_tools_source or "")
+        # Rely on AST scan only — string check produces false positives
+        # when evidence text itself contains "os.system" descriptions
+        os_system_in_source = len(violations) > 0
 
         conf = confidence_security_scan(
             violations=violations,
@@ -410,6 +412,156 @@ def repo_investigator(state: AgentState) -> List[Evidence]:
                         f"[confidence driven by: file readable + violation count + sandboxing patterns]"
                     ),
                     confidence=conf,
+                )
+            )
+
+        # ---------------------------------------------------------------
+        # Dimension 5: structured_output_enforcement
+        # Scan judges.py for .with_structured_output() / .bind_tools()
+        # ---------------------------------------------------------------
+        judges_source = read_file(tmp_dir, "src/nodes/judges.py")
+        if judges_source:
+            has_structured_output = ".with_structured_output" in judges_source
+            has_bind_tools = ".bind_tools" in judges_source
+            has_retry = "retry" in judges_source.lower() or "MAX_RETRIES" in judges_source
+            has_judicial_opinion_schema = "JudicialOpinion" in judges_source
+
+            evidences.append(
+                Evidence(
+                    goal="Verify structured output enforcement in Judge nodes",
+                    found=has_structured_output or has_bind_tools,
+                    content=(
+                        f".with_structured_output(): {'✓' if has_structured_output else '✗'}  |  "
+                        f".bind_tools(): {'✓' if has_bind_tools else '✗'}  |  "
+                        f"Retry logic: {'✓' if has_retry else '✗'}  |  "
+                        f"JudicialOpinion schema: {'✓' if has_judicial_opinion_schema else '✗'}"
+                    ),
+                    location="src/nodes/judges.py",
+                    rationale=(
+                        f"Text scan of judges.py: with_structured_output={has_structured_output}, "
+                        f"bind_tools={has_bind_tools}, retry_logic={has_retry}, "
+                        f"JudicialOpinion_schema={has_judicial_opinion_schema}. "
+                        "[confidence 0.9: text search for known API patterns]"
+                    ),
+                    confidence=0.9,
+                )
+            )
+        else:
+            evidences.append(
+                Evidence(
+                    goal="Verify structured output enforcement in Judge nodes",
+                    found=False,
+                    content=None,
+                    location="src/nodes/judges.py",
+                    rationale="File src/nodes/judges.py not found or unreadable. [confidence 1.0: deterministic]",
+                    confidence=1.0,
+                )
+            )
+
+        # ---------------------------------------------------------------
+        # Dimension 6: judicial_nuance
+        # Verify distinct personas for Prosecutor, Defense, TechLead
+        # ---------------------------------------------------------------
+        if judges_source:
+            has_prosecutor_prompt = "PROSECUTOR" in judges_source.upper()
+            has_defense_prompt = "DEFENSE" in judges_source.upper()
+            has_tech_lead_prompt = "TECH_LEAD" in judges_source.upper() or "TECHLEAD" in judges_source.upper()
+
+            # Check for adversarial / forgiving / pragmatic keywords
+            adversarial_keywords = ["trust no one", "vibe coding", "scrutinize", "gaps", "security flaws", "laziness"]
+            forgiving_keywords = ["reward effort", "spirit of the law", "creative workarounds", "intent"]
+            pragmatic_keywords = ["does it actually work", "maintainable", "architectural soundness", "technical debt"]
+
+            adversarial_count = sum(1 for kw in adversarial_keywords if kw.lower() in judges_source.lower())
+            forgiving_count = sum(1 for kw in forgiving_keywords if kw.lower() in judges_source.lower())
+            pragmatic_count = sum(1 for kw in pragmatic_keywords if kw.lower() in judges_source.lower())
+
+            all_three_distinct = has_prosecutor_prompt and has_defense_prompt and has_tech_lead_prompt
+            personas_rich = adversarial_count >= 2 and forgiving_count >= 2 and pragmatic_count >= 2
+
+            evidences.append(
+                Evidence(
+                    goal="Verify distinct judicial personas with conflicting philosophies",
+                    found=all_three_distinct and personas_rich,
+                    content=(
+                        f"Prosecutor prompt: {'✓' if has_prosecutor_prompt else '✗'}  |  "
+                        f"Defense prompt: {'✓' if has_defense_prompt else '✗'}  |  "
+                        f"TechLead prompt: {'✓' if has_tech_lead_prompt else '✗'}  |  "
+                        f"Adversarial keywords: {adversarial_count}/{len(adversarial_keywords)}  |  "
+                        f"Forgiving keywords: {forgiving_count}/{len(forgiving_keywords)}  |  "
+                        f"Pragmatic keywords: {pragmatic_count}/{len(pragmatic_keywords)}"
+                    ),
+                    location="src/nodes/judges.py",
+                    rationale=(
+                        f"Text scan: three distinct persona prompts={'✓' if all_three_distinct else '✗'}, "
+                        f"rich adversarial/forgiving/pragmatic language={'✓' if personas_rich else '✗'}. "
+                        "[confidence 0.85: keyword-based persona analysis]"
+                    ),
+                    confidence=0.85,
+                )
+            )
+
+        # ---------------------------------------------------------------
+        # Dimension 7: chief_justice_synthesis
+        # Verify deterministic Python rules in justice.py
+        # ---------------------------------------------------------------
+        justice_source = read_file(tmp_dir, "src/nodes/justice.py")
+        if justice_source:
+            import ast as _ast
+            has_deterministic_logic = False
+            has_security_override = False
+            has_fact_supremacy = False
+            has_variance_rule = False
+            has_audit_report = "AuditReport" in justice_source
+
+            # Check for deterministic if/else logic via AST
+            try:
+                justice_tree = _ast.parse(justice_source)
+                # Count if-statements — deterministic logic indicator
+                if_count = sum(1 for node in _ast.walk(justice_tree) if isinstance(node, _ast.If))
+                has_deterministic_logic = if_count >= 3  # At least 3 if-blocks = real logic
+            except SyntaxError:
+                pass
+
+            # Check for specific synthesis rules
+            has_security_override = "security" in justice_source.lower() and "cap" in justice_source.lower()
+            has_fact_supremacy = "evidence" in justice_source.lower() and "overrul" in justice_source.lower()
+            has_variance_rule = "variance" in justice_source.lower() and "re-evaluat" in justice_source.lower() or "re_evaluat" in justice_source.lower()
+
+            all_rules = has_security_override and has_fact_supremacy and has_deterministic_logic
+
+            evidences.append(
+                Evidence(
+                    goal="Verify Chief Justice uses deterministic Python rules for synthesis",
+                    found=all_rules,
+                    content=(
+                        f"Deterministic if/else logic: {'✓' if has_deterministic_logic else '✗'}  |  "
+                        f"Security override rule: {'✓' if has_security_override else '✗'}  |  "
+                        f"Fact supremacy rule: {'✓' if has_fact_supremacy else '✗'}  |  "
+                        f"Variance re-evaluation: {'✓' if has_variance_rule else '✗'}  |  "
+                        f"AuditReport output: {'✓' if has_audit_report else '✗'}"
+                    ),
+                    location="src/nodes/justice.py",
+                    rationale=(
+                        f"AST + text scan: deterministic_logic={has_deterministic_logic}, "
+                        f"security_override={has_security_override}, "
+                        f"fact_supremacy={has_fact_supremacy}, "
+                        f"variance_rule={has_variance_rule}, "
+                        f"AuditReport_output={has_audit_report}. "
+                        "[confidence 0.9: AST if-count + keyword analysis]"
+                    ),
+                    confidence=0.9,
+                )
+            )
+        else:
+            evidences.append(
+                Evidence(
+                    goal="Verify Chief Justice uses deterministic Python rules for synthesis",
+                    found=False,
+                    content=None,
+                    location="src/nodes/justice.py",
+                    rationale="File src/nodes/justice.py not found or unreadable. [confidence 1.0: deterministic]",
+                    confidence=1.0,
                 )
             )
 
