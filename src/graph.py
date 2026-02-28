@@ -236,7 +236,7 @@ def build_auditor_graph(checkpointer: Optional[MemorySaver] = None) -> StateGrap
     # Detective layer
     builder.add_node("repo_investigator", repo_investigator)
     builder.add_node("doc_analyst", doc_analyst)
-    # builder.add_node("vision_inspector", vision_inspector_node)
+    builder.add_node("vision_inspector", vision_inspector_node)
     builder.add_node("evidence_aggregator", evidence_aggregator)
 
     # Judicial layer
@@ -253,12 +253,12 @@ def build_auditor_graph(checkpointer: Optional[MemorySaver] = None) -> StateGrap
     # --- Detective Fan-Out: START → all detectives in parallel ---------------
     builder.add_edge(START, "repo_investigator")
     builder.add_edge(START, "doc_analyst")
-    # builder.add_edge(START, "vision_inspector")
+    builder.add_edge(START, "vision_inspector")
 
     # --- Detective Fan-In: all detectives → aggregator -----------------------
     builder.add_edge("repo_investigator", "evidence_aggregator")
     builder.add_edge("doc_analyst", "evidence_aggregator")
-    # builder.add_edge("vision_inspector", "evidence_aggregator")
+    builder.add_edge("vision_inspector", "evidence_aggregator")
 
     # --- Conditional routing: skip judges on fatal error ---------------------
     builder.add_conditional_edges(
