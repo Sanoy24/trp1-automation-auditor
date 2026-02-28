@@ -57,17 +57,27 @@ ARCHITECTURE_CRITERIA = {"graph_orchestration", "state_management_rigor"}
 
 
 def _has_security_violation(evidences: Dict[str, List[Evidence]]) -> bool:
-    """Check if any detective evidence confirms a security violation."""
+    """Check if any detective evidence confirms a security violation.
+
+    Only triggers when evidence explicitly reports a CONFIRMED violation
+    (found=False for security goal, or AST-confirmed os.system usage).
+    Does NOT trigger on evidence that describes the *absence* of violations.
+    """
     for source, evidence_list in evidences.items():
         for ev in evidence_list:
-            if ev.content:
-                for marker in SECURITY_VIOLATION_MARKERS:
-                    if marker.lower() in ev.content.lower():
-                        return True
-            if ev.rationale:
-                for marker in SECURITY_VIOLATION_MARKERS:
-                    if marker.lower() in ev.rationale.lower():
-                        return True
+            # Only flag evidence items that are security-related AND negative
+            is_security_goal = any(
+                term in (ev.goal or "").lower()
+                for term in ["os.system", "security", "shell injection", "sandbox"]
+            )
+
+            if is_security_goal and not ev.found:
+                # Evidence confirms a security failure was detected
+                if ev.rationale and "SECURITY VIOLATION" in ev.rationale.upper():
+                    return True
+                if ev.content and "violation" in ev.content.lower():
+                    return True
+
     return False
 
 
