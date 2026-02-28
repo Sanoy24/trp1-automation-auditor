@@ -138,7 +138,6 @@ def main() -> None:
             pdf_path=args.pdf_path,
             rubric_path=args.rubric_path,
             thread_id=args.thread_id,
-            output_dir=args.output_dir,
         )
     except KeyboardInterrupt:
         logger.warning("\n" + "!" * 60)
