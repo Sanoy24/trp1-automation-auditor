@@ -23,7 +23,7 @@ from src.state import AgentState, Evidence, JudicialOpinion
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3  # retry on malformed structured output
+MAX_RETRIES = 5  # retry on malformed structured output or rate limits
 
 
 # ---------------------------------------------------------------------------
@@ -188,23 +188,23 @@ def _run_judge(
     rubric_dimensions = state.get("rubric_dimensions", [])
     evidence_text = _format_evidence_for_prompt(evidences)
 
-    opinions: List[JudicialOpinion] = []
-    
     # We use both structured and base LLM for robustness
     from src.llm import get_llm
     base_llm = get_llm(role="judge", temperature=0.1)
-    # Note: .with_structured_output is the preferred LangChain way, 
+    # Note: .with_structured_output is the preferred LangChain way,
     # but we add manual fallback for local models (Ollama) that occasionally fail.
     structured_llm = base_llm.with_structured_output(JudicialOpinion)
 
-    for idx, criterion in enumerate(rubric_dimensions, 1):
+    def _judge_single_criterion(idx_criterion):
+        """Evaluate a single rubric criterion. Thread-safe."""
+        idx, criterion = idx_criterion
+        criterion_id = criterion.get("id", "unknown")
         try:
-            criterion_id = criterion.get("id", "unknown")
-            logger.info("%s starting analysis of '%s' (%d/%d)", 
+            logger.info("%s starting analysis of '%s' (%d/%d)",
                         judge_name, criterion_id, idx, len(rubric_dimensions))
-            
+
             criterion_prompt = _build_criterion_prompt(criterion, evidence_text)
-            
+
             # Hyper-explicit JSON instruction for small models
             schema_hint = (
                 "\n\nYOUR RESPONSE MUST BE A SINGLE VALID JSON OBJECT with this structure:\n"
@@ -215,21 +215,21 @@ def _run_judge(
                 "}\n"
                 "Do NOT include any text before or after the JSON."
             )
-            
+
             messages = [
                 SystemMessage(content=system_prompt + schema_hint),
                 HumanMessage(content=criterion_prompt),
             ]
 
             import time
-            backoff = 1.0  # start with 1s backoff
+            backoff = 2.0  # start with 2s backoff (rate limits need longer)
 
-            # Retry loop for structured output parsing failures
+            # Retry loop for structured output parsing failures AND rate limits
             for attempt in range(1, MAX_RETRIES + 1):
                 try:
                     # 1. Try native structured output
                     result = structured_llm.invoke(messages)
-                    
+
                     # If we got a result, wrap it
                     opinion = JudicialOpinion(
                         judge=judge_name,
@@ -238,21 +238,42 @@ def _run_judge(
                         argument=result.argument,
                         cited_evidence=result.cited_evidence,
                     )
-                    opinions.append(opinion)
                     logger.info("%s scored '%s': %d/5", judge_name, criterion["id"], opinion.score)
-                    break
+                    return opinion
 
                 except Exception as exc:
+                    exc_str = str(exc).lower()
+                    is_rate_limit = "429" in exc_str or "rate" in exc_str or "too many" in exc_str
+
+                    if is_rate_limit:
+                        # Rate limit — just backoff and retry, do NOT make another API call
+                        if attempt < MAX_RETRIES:
+                            logger.info("%s rate limited on '%s' (attempt %d/%d). Backing off %.1fs...",
+                                        judge_name, criterion_id, attempt, MAX_RETRIES, backoff)
+                            time.sleep(backoff)
+                            backoff *= 2.0
+                            continue
+                        else:
+                            logger.error("%s rate limited on all %d attempts for '%s'.",
+                                         judge_name, MAX_RETRIES, criterion_id)
+                            return JudicialOpinion(
+                                judge=judge_name,
+                                criterion_id=criterion["id"],
+                                score=3,
+                                argument=f"[RATE LIMITED] {judge_name} hit API rate limits after {MAX_RETRIES} retries. Error: {exc}",
+                                cited_evidence=[],
+                            )
+
                     logger.debug("%s structured invoke failed: %s. Attempting manual extraction...", judge_name, exc)
-                    
-                    # 2. Manual JSON Recovery from raw text
+
+                    # 2. Manual JSON Recovery from raw text (only for parse errors, not rate limits)
                     try:
                         raw_response = base_llm.invoke(messages)
                         content = raw_response.content
-                        
+
                         import json
                         import re
-                        
+
                         # Look for { ... } anywhere in the string
                         json_match = re.search(r"(\{.*\})", content, re.DOTALL)
                         if json_match:
@@ -264,22 +285,19 @@ def _run_judge(
                                 argument=raw_json.get("argument", content),
                                 cited_evidence=raw_json.get("cited_evidence", [])
                             )
-                            opinions.append(opinion)
                             logger.info("%s manually recovered JSON for '%s'", judge_name, criterion["id"])
-                            break
+                            return opinion
                     except Exception as recovery_exc:
                         logger.warning("%s manual recovery attempt %d failed: %s", judge_name, attempt, recovery_exc)
 
                     if attempt == MAX_RETRIES:
                         logger.error("%s failed all %d attempts for '%s'.", judge_name, MAX_RETRIES, criterion["id"])
-                        opinions.append(
-                            JudicialOpinion(
-                                judge=judge_name,
-                                criterion_id=criterion["id"],
-                                score=3,
-                                argument=f"[STRUCTURAL FAILURE] {judge_name} could not produce valid JSON. Error: {exc}",
-                                cited_evidence=[],
-                            )
+                        return JudicialOpinion(
+                            judge=judge_name,
+                            criterion_id=criterion["id"],
+                            score=3,
+                            argument=f"[STRUCTURAL FAILURE] {judge_name} could not produce valid JSON. Error: {exc}",
+                            cited_evidence=[],
                         )
                     else:
                         # Exponential backoff before retry
@@ -287,18 +305,29 @@ def _run_judge(
                         time.sleep(backoff)
                         backoff *= 2.0
         except Exception as fatal_exc:
-            logger.error("%s encountered a fatal error while processing '%s': %s", 
+            logger.error("%s encountered a fatal error while processing '%s': %s",
                          judge_name, criterion_id, fatal_exc)
-            # Add a failure opinion so the graph can continue
-            opinions.append(
-                JudicialOpinion(
-                    judge=judge_name,
-                    criterion_id=criterion_id,
-                    score=1,
-                    argument=f"[FATAL ERROR] Judge crashed while processing this criterion. Error: {fatal_exc}",
-                    cited_evidence=[],
-                )
+            return JudicialOpinion(
+                judge=judge_name,
+                criterion_id=criterion_id,
+                score=1,
+                argument=f"[FATAL ERROR] Judge crashed while processing this criterion. Error: {fatal_exc}",
+                cited_evidence=[],
             )
+
+    # Run all criteria in parallel using ThreadPoolExecutor
+    # NOTE: max_workers=2 because 3 judges run in LangGraph parallel,
+    # so total concurrent calls = 3 judges × 2 workers = 6 max.
+    # Higher parallelism causes 429 rate limits on Groq/OpenAI free tiers.
+    from concurrent.futures import ThreadPoolExecutor
+    indexed_criteria = list(enumerate(rubric_dimensions, 1))
+    # with ThreadPoolExecutor(max_workers=min(len(indexed_criteria), 10)) as executor:
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        opinions = list(executor.map(_judge_single_criterion, indexed_criteria))
+
+    # Filter out any None results (shouldn't happen but defensive)
+    opinions = [o for o in opinions if o is not None]
 
     logger.info("%s completed with %d opinions.", judge_name, len(opinions))
     return {"opinions": opinions}
